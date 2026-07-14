@@ -70,7 +70,7 @@ public static class Program
         var port = GetInt(ini, "port", defaults.Port);
         var key = GetStr(ini, "key", defaults.ConnectKey);
         var instance = GetOptStr(ini, "instance", defaults.DefaultInstanceName);
-        var admin = GetOptStr(ini, "admin", defaults.AdminHttpPrefix);
+        var status = GetOptStr(ini, "status", defaults.StatusHttpPrefix);
         var verbose = !GetBool(ini, "quiet", !defaults.Verbose);
         var peerDataDir = GetStr(ini, "peer-data-dir", defaults.PeerDataDirectory);
         var channels = (byte)GetInt(ini, "channels", defaults.ChannelsCount);
@@ -92,9 +92,9 @@ public static class Program
                 case "--instance" when next is not null:
                     instance = next.Length == 0 ? null : next; i++; break;
                 case "--no-instance": instance = null; break;
-                case "--admin" when next is not null:
-                    admin = next.Length == 0 ? null : next; i++; break;
-                case "--no-admin": admin = null; break;
+                case "--status" when next is not null:
+                    status = next.Length == 0 ? null : next; i++; break;
+                case "--no-status": status = null; break;
                 case "--quiet" or "-q": verbose = false; break;
                 case "--peer-data-dir" when next is not null: peerDataDir = next; i++; break;
                 case "--channels" when next is not null: channels = byte.Parse(next); i++; break;
@@ -115,7 +115,7 @@ public static class Program
             Port = port,
             ConnectKey = key,
             DefaultInstanceName = instance,
-            AdminHttpPrefix = admin,
+            StatusHttpPrefix = status,
             Verbose = verbose,
             PeerDataDirectory = peerDataDir,
             ChannelsCount = channels,
@@ -139,8 +139,8 @@ public static class Program
             ("key", d.ConnectKey, "Connect key clients must present in Hello."),
             ("instance", d.DefaultInstanceName ?? "",
                 "Baseline instance created at startup. Leave empty to skip."),
-            ("admin", d.AdminHttpPrefix ?? "",
-                "Admin HTTP prefix (HttpListener). Leave empty to disable."),
+            ("status", d.StatusHttpPrefix ?? "",
+                "Status HTTP prefix (HttpListener). Leave empty to disable."),
             ("quiet", (!d.Verbose).ToString().ToLowerInvariant(),
                 "true suppresses per-event logs; startup/errors always print."),
             ("peer-data-dir", d.PeerDataDirectory,
@@ -166,7 +166,7 @@ public static class Program
         Console.WriteLine($"  port                       = {o.Port}");
         Console.WriteLine($"  key                        = {o.ConnectKey}");
         Console.WriteLine($"  instance                   = {o.DefaultInstanceName ?? "(none)"}");
-        Console.WriteLine($"  admin                      = {o.AdminHttpPrefix ?? "(disabled)"}");
+        Console.WriteLine($"  status                     = {o.StatusHttpPrefix ?? "(disabled)"}");
         Console.WriteLine($"  quiet                      = {(!o.Verbose).ToString().ToLowerInvariant()}");
         Console.WriteLine($"  peer-data-dir              = {Path.GetFullPath(o.PeerDataDirectory)}");
         Console.WriteLine($"  channels                   = {o.ChannelsCount}");
@@ -208,8 +208,8 @@ public static class Program
           --key <s>                      Connect key clients must present
           --instance <s>                 Baseline instance created at startup
           --no-instance                  Do not create a baseline instance
-          --admin <url>                  Admin HTTP prefix
-          --no-admin                     Disable admin HTTP listener
+          --status <url>                 Status HTTP prefix
+          --no-status                    Disable status HTTP listener
           --quiet, -q                    Suppress per-event logs
           --peer-data-dir <path>         PeerData JSON store root
           --channels <n>                 LiteNetLib channel count (byte)

@@ -57,7 +57,7 @@ src/
 │                         ClientState)
 │                         (netstandard2.1, C# 9 — Unity-compatible)
 ├── Glow.Server/          Instance / Peer / handlers / dispatcher / transport /
-│                         persistence / admin HTTP / bandwidth limiter
+│                         persistence / status HTTP / bandwidth limiter
 │                         (net10.0, NativeAOT-ready)
 ├── Glow.Cli/             Interactive REPL frontend built on Glow.Client
 │                         (net10.0, NativeAOT-ready)
@@ -117,8 +117,8 @@ Glow.Server [options]
   --key <s>           Connect key clients must present (default: glow)
   --instance <s>      Baseline instance created at startup (default: default)
   --no-instance       Do not create a baseline instance
-  --admin <url>       Admin HTTP prefix (default: http://localhost:5155/)
-  --no-admin          Disable admin HTTP listener
+  --status <url>      Status HTTP prefix (default: http://localhost:5155/)
+  --no-status         Disable status HTTP listener
   --quiet, -q         Suppress per-event logs (connects, joins, ownership, sweeps)
   --help, -h          Show help
 ```
@@ -133,7 +133,7 @@ Per-event logs (on by default, hidden by `--quiet`):
 
 Startup banners, shutdown notices, and errors are always printed regardless of `--quiet`.
 
-**Admin HTTP** (read-only introspection):
+**Status HTTP** (read-only introspection):
 
 - `GET /` — hello + version + current server-time in ms
 - `GET /state` — full JSON dump: sessions, instances, peers, master, cached messages, bandwidth stats, object owner map

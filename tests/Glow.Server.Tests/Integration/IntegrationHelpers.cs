@@ -26,7 +26,7 @@ public sealed class ServerHarness : IAsyncDisposable
             Port = 0,
             ConnectKey = "glow",
             DefaultInstanceName = "test-instance",
-            AdminHttpPrefix = null,
+            StatusHttpPrefix = null,
             ServerTimeBroadcastIntervalMs = 100000,
             PerSessionBytesPerSecond = bandwidthBytesPerSecond ?? 11 * 1024,
             PeerDataDirectory = _tempDir,

@@ -9,7 +9,7 @@ namespace Glow.Server;
 // deliberately minimal - no auth, no writes, no long-poll. Killed on
 // dispose. Uses HttpListener because Kestrel's dependency tree is
 // heavier than we need for a debug endpoint.
-public sealed class AdminHttpServer : IDisposable
+public sealed class StatusHttpServer : IDisposable
 {
     readonly HttpListener _listener = new();
     readonly GlowServer _server;
@@ -17,7 +17,7 @@ public sealed class AdminHttpServer : IDisposable
     readonly string _prefix;
     Task? _acceptTask;
 
-    public AdminHttpServer(GlowServer server, string prefix)
+    public StatusHttpServer(GlowServer server, string prefix)
     {
         _prefix = prefix;
         _server = server;
@@ -28,7 +28,7 @@ public sealed class AdminHttpServer : IDisposable
     {
         _listener.Start();
         _acceptTask = Task.Run(AcceptLoop);
-        Console.WriteLine($"[admin] listening on {_prefix}");
+        Console.WriteLine($"[status] listening on {_prefix}");
     }
 
     public void Dispose()
@@ -63,7 +63,7 @@ public sealed class AdminHttpServer : IDisposable
             {
                 case "/":
                     Respond(ctx, 200, "text/plain",
-                        $"Glow admin. Endpoints: /state /version\n{Shared.Meta.Name} build {Shared.Meta.BuildVersion} | Protocol v{Shared.Meta.ProtocolVersion} | Server time {_server.Clock.NowMs} ms\n");
+                        $"Glow status. Endpoints: /state /version\n{Shared.Meta.Name} build {Shared.Meta.BuildVersion} | Protocol v{Shared.Meta.ProtocolVersion} | Server time {_server.Clock.NowMs} ms\n");
                     break;
                 case "/version":
                     Respond(ctx, 200, "application/json", BuildVersionJson());
