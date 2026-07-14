@@ -185,6 +185,22 @@ public class MessageCacheTests
     }
 
     [Fact]
+    public void RemoveByCodeAndKeyGlobal_DropsAllSendersForMatchingPair()
+    {
+        var c = new MessageCache();
+        c.Add(1, 20, DeliveryMode.ReliableOrdered, 0, new byte[] { 1 }, cacheKey: 100);
+        c.Add(2, 20, DeliveryMode.ReliableOrdered, 0, new byte[] { 2 }, cacheKey: 100);
+        c.Add(3, 20, DeliveryMode.ReliableOrdered, 0, new byte[] { 3 }, cacheKey: 100);
+        c.Add(1, 20, DeliveryMode.ReliableOrdered, 0, new byte[] { 4 }, cacheKey: 200);
+        c.Add(1, 21, DeliveryMode.ReliableOrdered, 0, new byte[] { 5 }, cacheKey: 100);
+        // Global variant collapses the (20, 100) slot regardless of sender
+        // — three entries share that (code, key) and all must be dropped.
+        Assert.Equal(3, c.RemoveByCodeAndKeyGlobal(20, 100));
+        Assert.Equal(2, c.Count);
+        Assert.All(c.Entries, e => Assert.False(e.MessageCode == 20 && e.CacheKey == 100));
+    }
+
+    [Fact]
     public void CachedMessage_DefaultCacheKeyIsZero()
     {
         var c = new MessageCache();

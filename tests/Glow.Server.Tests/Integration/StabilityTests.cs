@@ -193,6 +193,141 @@ public class StabilityTests
         Assert.Equal(new[] { 1, 2, 3 }, keys);
     }
 
+    // Regression coverage for the per-sender ReplaceLatest semantics: two
+    // different senders writing under the same (code, key) each retain
+    // their own snapshot — the policy scopes uniqueness per sender.
+    [Fact]
+    public async Task ReplaceLatest_DifferentSenders_KeepsPerSenderEntries()
+    {
+        await using var srv = new ServerHarness();
+        await using var a = new TestClient();
+        await using var b = new TestClient();
+        Assert.True(await a.ConnectAsync(srv.Port));
+        await Hello(a, "alice");
+        await Join(a, "test-instance");
+        Assert.True(await b.ConnectAsync(srv.Port));
+        await Hello(b, "bob");
+        await Join(b, "test-instance");
+
+        a.Fire(new Shared.Messages.SendMessage(0, 50, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatest, DeliveryMode.ReliableOrdered, (byte)0,
+            System.Text.Encoding.UTF8.GetBytes("snap-alice"), CacheKey: 555));
+        b.Fire(new Shared.Messages.SendMessage(0, 50, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatest, DeliveryMode.ReliableOrdered, (byte)0,
+            System.Text.Encoding.UTF8.GetBytes("snap-bob"), CacheKey: 555));
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+
+        var cache = srv.Server.Instances.All["test-instance"].Cache;
+        var forKey = cache.Entries.Where(e => e.MessageCode == 50 && e.CacheKey == 555).ToArray();
+        Assert.Equal(2, forKey.Length);
+        var payloads = forKey.Select(e => System.Text.Encoding.UTF8.GetString(e.Payload.Span))
+            .OrderBy(s => s).ToArray();
+        Assert.Equal(new[] { "snap-alice", "snap-bob" }, payloads);
+    }
+
+    // ReplaceLatestGlobal collapses the (code, key) slot across all
+    // senders. Alice's snapshot is superseded by Bob's write; a late
+    // joiner sees only the winning entry.
+    [Fact]
+    public async Task ReplaceLatestGlobal_SameKey_DifferentSenders_KeepsOnlyLast()
+    {
+        await using var srv = new ServerHarness();
+        await using var a = new TestClient();
+        await using var b = new TestClient();
+        Assert.True(await a.ConnectAsync(srv.Port));
+        await Hello(a, "alice");
+        await Join(a, "test-instance");
+        Assert.True(await b.ConnectAsync(srv.Port));
+        await Hello(b, "bob");
+        await Join(b, "test-instance");
+
+        a.Fire(new Shared.Messages.SendMessage(0, 60, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, (byte)0,
+            System.Text.Encoding.UTF8.GetBytes("snap-alice"), CacheKey: 777));
+        b.Fire(new Shared.Messages.SendMessage(0, 60, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, (byte)0,
+            System.Text.Encoding.UTF8.GetBytes("snap-bob"), CacheKey: 777));
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+
+        var cache = srv.Server.Instances.All["test-instance"].Cache;
+        var forKey = cache.Entries.Where(e => e.MessageCode == 60 && e.CacheKey == 777).ToArray();
+        Assert.Single(forKey);
+        Assert.Equal("snap-bob", System.Text.Encoding.UTF8.GetString(forKey[0].Payload.Span));
+
+        await using var c = new TestClient();
+        Assert.True(await c.ConnectAsync(srv.Port));
+        await Hello(c, "charlie");
+        await Join(c, "test-instance");
+
+        var replayed = await c.WaitFor<IncomingCachedMessage>(m => m.MessageCode == 60);
+        Assert.Equal("snap-bob", System.Text.Encoding.UTF8.GetString(replayed.Payload.Span));
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        var replays = c.Received.OfType<IncomingCachedMessage>().Where(m => m.MessageCode == 60).ToArray();
+        Assert.Single(replays);
+    }
+
+    // Distinct CacheKey values name distinct logical slots even under the
+    // global policy, so writes to different keys never displace each other.
+    [Fact]
+    public async Task ReplaceLatestGlobal_DifferentKeys_AllRetained()
+    {
+        await using var srv = new ServerHarness();
+        await using var a = new TestClient();
+        Assert.True(await a.ConnectAsync(srv.Port));
+        await Hello(a, "alice");
+        await Join(a, "test-instance");
+
+        a.Fire(new Shared.Messages.SendMessage(0, 65, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, (byte)0,
+            System.Text.Encoding.UTF8.GetBytes("obj-A"), CacheKey: 1));
+        a.Fire(new Shared.Messages.SendMessage(0, 65, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, (byte)0,
+            System.Text.Encoding.UTF8.GetBytes("obj-B"), CacheKey: 2));
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+
+        var cache = srv.Server.Instances.All["test-instance"].Cache;
+        var forCode = cache.Entries.Where(e => e.MessageCode == 65).ToArray();
+        Assert.Equal(2, forCode.Length);
+        var keys = forCode.Select(e => e.CacheKey).OrderBy(k => k).ToArray();
+        Assert.Equal(new[] { 1, 2 }, keys);
+
+        await using var b = new TestClient();
+        Assert.True(await b.ConnectAsync(srv.Port));
+        await Hello(b, "bob");
+        await Join(b, "test-instance");
+
+        await b.WaitFor<IncomingCachedMessage>(m =>
+            m.MessageCode == 65 && System.Text.Encoding.UTF8.GetString(m.Payload.Span) == "obj-A");
+        await b.WaitFor<IncomingCachedMessage>(m =>
+            m.MessageCode == 65 && System.Text.Encoding.UTF8.GetString(m.Payload.Span) == "obj-B");
+    }
+
+    // (code, key) is compound: the same CacheKey under a different
+    // MessageCode is a separate logical slot and must not be evicted.
+    [Fact]
+    public async Task ReplaceLatestGlobal_DifferentCode_NoInterference()
+    {
+        await using var srv = new ServerHarness();
+        await using var a = new TestClient();
+        Assert.True(await a.ConnectAsync(srv.Port));
+        await Hello(a, "alice");
+        await Join(a, "test-instance");
+
+        a.Fire(new Shared.Messages.SendMessage(0, 70, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, (byte)0,
+            System.Text.Encoding.UTF8.GetBytes("code-70"), CacheKey: 42));
+        a.Fire(new Shared.Messages.SendMessage(0, 71, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, (byte)0,
+            System.Text.Encoding.UTF8.GetBytes("code-71"), CacheKey: 42));
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+
+        var cache = srv.Server.Instances.All["test-instance"].Cache;
+        var forKey = cache.Entries.Where(e => e.CacheKey == 42).ToArray();
+        Assert.Equal(2, forKey.Length);
+        var codes = forKey.Select(e => e.MessageCode).OrderBy(c => c).ToArray();
+        Assert.Equal(new byte[] { 70, 71 }, codes);
+    }
+
     // ============================================================
     // MASTER ROTATION
     // ============================================================

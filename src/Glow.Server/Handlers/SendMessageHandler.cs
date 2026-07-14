@@ -136,6 +136,14 @@ public static class SendMessageHandler
                 instance.Cache.RemoveByCodeAndKey(msg.MessageCode, senderPeerId, msg.CacheKey);
                 instance.Cache.Add(senderPeerId, msg.MessageCode, msg.Delivery, msg.Channel, msg.Payload, msg.CacheKey);
                 break;
+            case CachePolicy.ReplaceLatestGlobal:
+                // Sender-agnostic single-entry bucket per (code, CacheKey).
+                // The key names a shared logical slot; whichever peer writes
+                // most recently owns it and any prior snapshot from any
+                // other peer is evicted before the new one is appended.
+                instance.Cache.RemoveByCodeAndKeyGlobal(msg.MessageCode, msg.CacheKey);
+                instance.Cache.Add(senderPeerId, msg.MessageCode, msg.Delivery, msg.Channel, msg.Payload, msg.CacheKey);
+                break;
         }
     }
 }
