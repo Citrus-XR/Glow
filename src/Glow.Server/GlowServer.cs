@@ -14,7 +14,7 @@ public sealed class GlowServer
     readonly ServerOptions _options;
     readonly LiteNetTransport _transport;
     readonly MessageDispatcher _dispatcher;
-    readonly AdminHttpServer? _admin;
+    readonly StatusHttpServer? _status;
     long _lastServerTimeBroadcastMs;
 
     public GlowServer(ServerOptions options)
@@ -29,8 +29,8 @@ public sealed class GlowServer
             onConnected: OnConnected,
             onDisconnected: OnDisconnected);
         _dispatcher = new MessageDispatcher(this);
-        if (options.AdminHttpPrefix is not null)
-            _admin = new AdminHttpServer(this, options.AdminHttpPrefix);
+        if (options.StatusHttpPrefix is not null)
+            _status = new StatusHttpServer(this, options.StatusHttpPrefix);
         if (options.DefaultInstanceName is not null)
         {
             Instances.TryCreate(options.DefaultInstanceName, out var defaultInstance);
@@ -48,7 +48,7 @@ public sealed class GlowServer
     {
         _transport.Start();
         Console.WriteLine($"[server] listening on UDP {_transport.BoundPort} (connect key: {_options.ConnectKey})");
-        _admin?.Start();
+        _status?.Start();
     }
 
     public void Tick()
@@ -61,7 +61,7 @@ public sealed class GlowServer
 
     public void Stop()
     {
-        _admin?.Dispose();
+        _status?.Dispose();
         _transport.Stop();
     }
 

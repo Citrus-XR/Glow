@@ -6,7 +6,7 @@ public sealed record ServerOptions
     public string ConnectKey { get; init; } = "glow";
     public string? DefaultInstanceName { get; init; } = "default";
     public int ServerTimeBroadcastIntervalMs { get; init; } = 1000;
-    public string? AdminHttpPrefix { get; init; } = "http://localhost:5155/";
+    public string? StatusHttpPrefix { get; init; } = "http://localhost:5155/";
     public int PerSessionBytesPerSecond { get; init; } = 11 * 1024;
     public string PeerDataDirectory { get; init; } = "peer-data";
 

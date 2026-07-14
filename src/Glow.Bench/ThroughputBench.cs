@@ -176,7 +176,7 @@ sealed class BenchServerHarness : IAsyncDisposable
             Port = 0,
             ConnectKey = "bench",
             DefaultInstanceName = "bench",
-            AdminHttpPrefix = null,
+            StatusHttpPrefix = null,
             ServerTimeBroadcastIntervalMs = 100_000,
             PerSessionBytesPerSecond = bandwidthBytesPerSecond,
             PeerDataDirectory = _dir,
