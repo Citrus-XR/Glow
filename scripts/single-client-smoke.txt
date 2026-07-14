@@ -1,0 +1,15 @@
+# Single-client v2 smoke: hello, join, send an event, print state.
+connect localhost:15055
+sleep 400
+hello alice
+sleep 200
+join default
+sleep 400
+send 10 "hello world"
+sleep 200
+peerdata score=100 mood="cheerful"
+sleep 300
+own 42
+sleep 200
+state
+sleep 300

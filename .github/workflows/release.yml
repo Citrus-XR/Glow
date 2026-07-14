@@ -1,0 +1,240 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0). Leave empty for a draft dry-run.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: test (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: restore
+        run: dotnet restore Glow.slnx
+      - name: test
+        run: dotnet test Glow.slnx --configuration Release --no-restore --logger "console;verbosity=normal"
+
+  build:
+    name: aot ${{ matrix.os_name }}-x64
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            os_name: linux
+            rid: linux-x64
+            archive_ext: tar.gz
+            server_bin: Glow.Server
+            cli_bin: Glow.Cli
+          - os: windows-latest
+            os_name: windows
+            rid: win-x64
+            archive_ext: zip
+            server_bin: Glow.Server.exe
+            cli_bin: Glow.Cli.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: resolve version
+        id: ver
+        shell: bash
+        run: |
+          ref="${GITHUB_REF##*/}"
+          input="${{ github.event.inputs.tag }}"
+          if [ -n "$input" ]; then
+            v="$input"
+          elif [[ "$ref" == v* ]]; then
+            v="$ref"
+          else
+            v="v0.0.0-dev+${GITHUB_SHA:0:8}"
+          fi
+          # $v is the display version (tag-like, e.g. v0.0.3 or v0.0.0-dev+abcd1234).
+          # msbuild's -p:Version needs a bare x.y.z; strip 'v', pre-release, and metadata.
+          no_v="${v#v}"
+          no_pre="${no_v%%-*}"
+          numeric="${no_pre%%+*}"
+          # InformationalVersion is a free string; always attach a short SHA if the
+          # version didn't already carry one, so any binary can be traced back.
+          info="$no_v"
+          if [[ "$info" != *+* ]]; then
+            info="$info+${GITHUB_SHA:0:8}"
+          fi
+          echo "version=$v"           >> "$GITHUB_OUTPUT"
+          echo "version_numeric=$numeric" >> "$GITHUB_OUTPUT"
+          echo "version_info=$info"   >> "$GITHUB_OUTPUT"
+          echo "resolved: display=$v, numeric=$numeric, info=$info"
+
+      - name: publish Glow.Server
+        run: >
+          dotnet publish src/Glow.Server/Glow.Server.csproj
+          -c Release
+          -r ${{ matrix.rid }}
+          -p:Version=${{ steps.ver.outputs.version_numeric }}
+          -p:InformationalVersion=${{ steps.ver.outputs.version_info }}
+          -o publish/${{ matrix.rid }}/server
+
+      - name: publish Glow.Cli
+        run: >
+          dotnet publish src/Glow.Cli/Glow.Cli.csproj
+          -c Release
+          -r ${{ matrix.rid }}
+          -p:Version=${{ steps.ver.outputs.version_numeric }}
+          -p:InformationalVersion=${{ steps.ver.outputs.version_info }}
+          -o publish/${{ matrix.rid }}/cli
+
+      - name: stage payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="stage/glow-${{ steps.ver.outputs.version }}-${{ matrix.os_name }}-x64"
+          mkdir -p "$stage"
+          cp "publish/${{ matrix.rid }}/server/${{ matrix.server_bin }}" "$stage/"
+          cp "publish/${{ matrix.rid }}/cli/${{ matrix.cli_bin }}" "$stage/"
+          cp README.md "$stage/"
+          ls -la "$stage"
+
+      - name: archive (linux)
+        if: matrix.os_name == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="glow-${{ steps.ver.outputs.version }}-linux-x64"
+          mkdir -p dist
+          tar -C stage -czf "dist/${name}.tar.gz" "${name}"
+          ( cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" )
+
+      - name: archive (windows)
+        if: matrix.os_name == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = "glow-${{ steps.ver.outputs.version }}-windows-x64"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "stage/$name" -DestinationPath "dist/$name.zip" -Force
+          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "dist/$name.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glow-${{ matrix.os_name }}-x64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  unity-bundle:
+    name: unity bundle (netstandard2.1)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: resolve version
+        id: ver
+        shell: bash
+        run: |
+          ref="${GITHUB_REF##*/}"
+          input="${{ github.event.inputs.tag }}"
+          if [ -n "$input" ]; then
+            v="$input"
+          elif [[ "$ref" == v* ]]; then
+            v="$ref"
+          else
+            v="v0.0.0-dev+${GITHUB_SHA:0:8}"
+          fi
+          no_v="${v#v}"
+          no_pre="${no_v%%-*}"
+          numeric="${no_pre%%+*}"
+          info="$no_v"
+          if [[ "$info" != *+* ]]; then
+            info="$info+${GITHUB_SHA:0:8}"
+          fi
+          echo "version=$v"               >> "$GITHUB_OUTPUT"
+          echo "version_numeric=$numeric" >> "$GITHUB_OUTPUT"
+          echo "version_info=$info"       >> "$GITHUB_OUTPUT"
+          echo "resolved: display=$v, numeric=$numeric, info=$info"
+
+      # Publishing Glow.Client for its netstandard2.1 target collects
+      # Glow.Client.dll + Glow.Shared.dll + LiteNetLib.dll into one
+      # folder -- exactly what Unity's Assets/Plugins/Glow/ needs.
+      - name: publish Glow.Client
+        run: >
+          dotnet publish src/Glow.Client/Glow.Client.csproj
+          -c Release
+          -p:Version=${{ steps.ver.outputs.version_numeric }}
+          -p:InformationalVersion=${{ steps.ver.outputs.version_info }}
+          -o publish/unity-raw
+
+      - name: stage unity bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="glow-${{ steps.ver.outputs.version }}-unity"
+          stage="stage/${name}"
+          mkdir -p "$stage"
+          cp publish/unity-raw/Glow.Client.dll "$stage/"
+          cp publish/unity-raw/Glow.Shared.dll "$stage/"
+          cp publish/unity-raw/LiteNetLib.dll "$stage/"
+          cp README.md "$stage/"
+          ls -la "$stage"
+
+      - name: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="glow-${{ steps.ver.outputs.version }}-unity"
+          mkdir -p dist
+          ( cd stage && zip -r "../dist/${name}.zip" "${name}" )
+          ( cd dist && sha256sum "${name}.zip" > "${name}.zip.sha256" )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glow-unity
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: publish release
+    needs: [build, unity-bundle]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: list
+        run: ls -la artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Glow.Shared/Glow.Shared.csproj" />
+    <Project Path="src/Glow.Server/Glow.Server.csproj" />
+    <Project Path="src/Glow.Client/Glow.Client.csproj" />
+    <Project Path="src/Glow.Cli/Glow.Cli.csproj" />
+    <Project Path="src/Glow.Bench/Glow.Bench.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Glow.Server.Tests/Glow.Server.Tests.csproj" />
+    <Project Path="tests/Glow.Shared.Tests/Glow.Shared.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Glow.Cli</RootNamespace>
+    <PublishAot>true</PublishAot>
+    <StripSymbols>true</StripSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Glow.Client\Glow.Client.csproj" />
+    <ProjectReference Include="..\Glow.Shared\Glow.Shared.csproj" />
+  </ItemGroup>
+
+</Project>
