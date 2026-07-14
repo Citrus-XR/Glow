@@ -23,12 +23,22 @@ public sealed class MessageCache
             (messageCode == 0 || e.MessageCode == messageCode) &&
             (senderPeerId == 0 || e.SenderPeerId == senderPeerId));
 
-    // Drop any prior entry with the same (sender, code, key) so ReplaceLatest
-    // keeps a single most-recent snapshot per logical stream.
+    // Drop any prior entry with the same (sender, code, key). Backs the
+    // per-sender ReplaceLatest policy where each peer owns an independent
+    // slot.
     public int RemoveByCodeAndKey(byte messageCode, int senderPeerId, int cacheKey) =>
         _entries.RemoveAll(e =>
             e.MessageCode == messageCode &&
             e.SenderPeerId == senderPeerId &&
+            e.CacheKey == cacheKey);
+
+    // Drop any prior entry with the same (code, key) regardless of sender.
+    // Backs the sender-agnostic ReplaceLatestGlobal policy where (code,
+    // key) names a shared logical slot; a write from any peer supersedes
+    // whatever the previous owner had cached.
+    public int RemoveByCodeAndKeyGlobal(byte messageCode, int cacheKey) =>
+        _entries.RemoveAll(e =>
+            e.MessageCode == messageCode &&
             e.CacheKey == cacheKey);
 
     public void Clear() => _entries.Clear();
