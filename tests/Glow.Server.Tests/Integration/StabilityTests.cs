@@ -278,6 +278,14 @@ public class StabilityTests
     // ReplaceLatestGlobal collapses the (code, key) slot across all
     // senders. Alice's snapshot is superseded by Bob's write; a late
     // joiner sees only the winning entry.
+    //
+    // NOTE: the policy is defined as "server-arrival last-wins". Firing
+    // two SendMessages from two sockets in quick succession only orders
+    // them at the sender; UDP arrival order at the server is not
+    // guaranteed. To make the test deterministic we wait for the peer
+    // opposite to observe each write (Routing.Others broadcast → mirrors
+    // the server-side handler ordering faithfully) before firing the
+    // next one.
     [Fact]
     public async Task ReplaceLatestGlobal_SameKey_DifferentSenders_KeepsOnlyLast()
     {
@@ -294,10 +302,19 @@ public class StabilityTests
         a.Fire(new Shared.Messages.SendMessage(0, 60, Routing.Others, null, 0,
             CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, (byte)0,
             System.Text.Encoding.UTF8.GetBytes("snap-alice"), CacheKey: 777));
+        // Barrier: block until Bob's socket has actually observed Alice's
+        // broadcast. Once b sees it, the server has already processed Alice's
+        // Add — Bob's subsequent Fire is guaranteed to hit RemoveByCodeAndKey
+        // on a cache that contains "snap-alice".
+        await b.WaitFor<IncomingMessage>(m => m.MessageCode == 60);
+
         b.Fire(new Shared.Messages.SendMessage(0, 60, Routing.Others, null, 0,
             CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, (byte)0,
             System.Text.Encoding.UTF8.GetBytes("snap-bob"), CacheKey: 777));
-        await Task.Delay(150, TestContext.Current.CancellationToken);
+        // Symmetric barrier so we know Bob's message has been processed
+        // before we inspect the cache. Alice sees Bob because Routing.Others
+        // excludes the sender.
+        await a.WaitFor<IncomingMessage>(m => m.MessageCode == 60);
 
         var cache = srv.Server.Instances.All["test-instance"].Cache;
         var forKey = cache.Entries.Where(e => e.MessageCode == 60 && e.CacheKey == 777).ToArray();
