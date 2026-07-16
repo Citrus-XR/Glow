@@ -75,6 +75,28 @@ public static class InstanceHandlers
         var i = 0;
         foreach (var p in instance.Peers.Values) peerIds[i++] = p.PeerId;
 
+        // Freeze every existing peer's PeerData into the ack so the
+        // joiner can rebuild remote state in one atomic step. Sessions
+        // for the newcomer itself and for peers with no populated
+        // stores are omitted. Each store map is deep-copied so a later
+        // mutation on the source Session doesn't leak into the frozen
+        // ack payload.
+        var existingPeersData = new Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>>();
+        foreach (var peerSession in server.InstanceSessions(instance))
+        {
+            if (peerSession.ConnectionId == session.ConnectionId) continue;
+            if (peerSession.CurrentPeer is null) continue;
+            if (peerSession.PeerData.Count == 0) continue;
+            var storesCopy = new Dictionary<byte, Dictionary<string, PropertyValue>>(peerSession.PeerData.Count);
+            foreach (var storeKv in peerSession.PeerData)
+            {
+                if (storeKv.Value.Count == 0) continue;
+                storesCopy[storeKv.Key] = new Dictionary<string, PropertyValue>(storeKv.Value);
+            }
+            if (storesCopy.Count > 0)
+                existingPeersData[peerSession.CurrentPeer.PeerId] = storesCopy;
+        }
+
         server.Send(session, new JoinInstanceAck(
             msg.RequestId,
             instance.Name,
@@ -83,25 +105,8 @@ public static class InstanceHandlers
             peerIds,
             new Dictionary<string, PropertyValue>(instance.Properties),
             new Dictionary<int, int>(instance.ObjectOwners),
-            server.Clock.NowMs));
-
-        // Push each existing peer's PeerData snapshot to the newcomer.
-        // This is how new clients rebuild remote state without a poll.
-        // One PeerDataChanged per (peer, substore) so the receiver's
-        // handler can dispatch by store tag exactly like a live mutation.
-        foreach (var peerSession in server.InstanceSessions(instance))
-        {
-            if (peerSession.ConnectionId == session.ConnectionId) continue;
-            if (peerSession.CurrentPeer is null) continue;
-            foreach (var storeKv in peerSession.PeerData)
-            {
-                if (storeKv.Value.Count == 0) continue;
-                server.Send(session, new PeerDataChanged(
-                    peerSession.CurrentPeer.PeerId,
-                    storeKv.Key,
-                    new Dictionary<string, PropertyValue>(storeKv.Value)));
-            }
-        }
+            server.Clock.NowMs,
+            existingPeersData));
 
         // Replay cached messages in insertion order, on the original
         // sender's delivery + channel. Envelope is IncomingCachedMessage

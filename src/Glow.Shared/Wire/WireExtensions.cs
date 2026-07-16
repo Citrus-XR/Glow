@@ -119,6 +119,41 @@ public static class WireExtensions
         return stores;
     }
 
+    // ---- Dictionary<int peerId, Dictionary<byte store, Dictionary<string, PropertyValue>>> --
+    // Snapshot of every existing peer's PeerData for a late joiner's
+    // JoinInstanceAck: outer key is PeerId, inner is the same
+    // store-tagged property map used in HelloAck / PeerJoined.
+    public static void PutPeerStorePropertyMap(this NetDataWriter w,
+        Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>>? peers)
+    {
+        if (peers is null || peers.Count == 0)
+        {
+            w.Put((ushort)0);
+            return;
+        }
+        if (peers.Count > ushort.MaxValue)
+            throw new InvalidOperationException("PeerStorePropertyMap exceeds 65535 peers.");
+        w.Put((ushort)peers.Count);
+        foreach (var kv in peers)
+        {
+            w.Put(kv.Key);
+            w.PutStorePropertyMap(kv.Value);
+        }
+    }
+
+    public static Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>> GetPeerStorePropertyMap(this NetDataReader r)
+    {
+        var count = r.GetUShort();
+        var peers = new Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var peerId = r.GetInt();
+            var stores = r.GetStorePropertyMap();
+            peers[peerId] = stores;
+        }
+        return peers;
+    }
+
     // ---- Optional string (bool-prefixed) --------------------------
 
     public static void PutOptString(this NetDataWriter w, string? s)

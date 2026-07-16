@@ -11,7 +11,7 @@ public static class MessagePrinter
     public static string Format(Message m) => m switch
     {
         HelloAck a => $"HelloAck userId=\"{a.AssignedUserId}\" t={a.ServerTimeMs} peerData={FormatStoreCounts(a.PeerData)} serverBuild=\"{a.ServerBuildVersion}\"",
-        JoinInstanceAck a => $"JoinInstanceAck instance=\"{a.InstanceName}\" self={a.MyPeerId} master={a.MasterPeerId} peers=[{string.Join(",", a.PeerIds)}] instanceProps={a.InstanceProperties.Count} owners={a.ObjectOwners.Count}",
+        JoinInstanceAck a => $"JoinInstanceAck instance=\"{a.InstanceName}\" self={a.MyPeerId} master={a.MasterPeerId} peers=[{string.Join(",", a.PeerIds)}] instanceProps={a.InstanceProperties.Count} owners={a.ObjectOwners.Count} existingPeerData={a.ExistingPeersData.Count}",
         LeaveInstanceAck a => $"LeaveInstanceAck ok",
         PeerJoined a => $"PeerJoined peer={a.PeerId} props={a.Properties.Count} peerData={FormatStoreCounts(a.PeerData)}",
         PeerLeft a => $"PeerLeft peer={a.PeerId} inactive={a.BecameInactive} newMaster={a.NewMasterPeerId}",

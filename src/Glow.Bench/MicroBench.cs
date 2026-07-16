@@ -54,7 +54,8 @@ public static class MicroBench
                     ["team2"] = PropertyValue.From("blue"),
                 },
                 new Dictionary<int, int> { [100] = 1, [200] = 2 },
-                123456L),
+                123456L,
+                new Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>>()),
             fresh: true);
 
         var smallPayload = Encoding.UTF8.GetBytes("hello");

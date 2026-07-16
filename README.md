@@ -243,6 +243,8 @@ Every request-style message carries a client-allocated `uint RequestId`; the pai
 
 `JoinInstance` accepts an optional `ClaimObjectIds: int[]?` — a preset list of network ids the joining peer wants to claim ownership of atomically at join time. Each id is CAS-claimed against "unowned" (already-owned ids skip silently), so it's safe for every peer to declare its baked-in scene ids on entry. Successful claims land in the returned `JoinInstanceAck.ObjectOwners` snapshot and produce one `ObjectOwnerChanged` broadcast to existing peers.
 
+`JoinInstanceAck.ExistingPeersData` is a `Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>>` snapshot of every existing active peer's PeerData at ack time, keyed by `PeerId`. Late joiners rebuild the full remote-peer state atomically from the ack instead of stitching together a follow-up train of `PeerDataChanged` messages. Peers with no populated stores are omitted; the map is empty when the joiner arrives alone. Live mutations that land between the snapshot and the ack are delivered as normal `PeerDataChanged` after the join.
+
 ### DeliveryMode
 
 Per-`SendMessage` field; server transports at that delivery mode; receiver sees it on `IncomingMessage.Delivery`.

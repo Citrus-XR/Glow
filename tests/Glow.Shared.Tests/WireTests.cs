@@ -214,7 +214,19 @@ public class MessageCodecTests
             new[] { 1, 2, 3 },
             new Dictionary<string, PropertyValue> { ["mode"] = PropertyValue.From("match") },
             new Dictionary<int, int> { [100] = 2 },
-            98765L);
+            98765L,
+            new Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>>
+            {
+                [1] = new()
+                {
+                    [0] = new Dictionary<string, PropertyValue> { ["team"] = PropertyValue.From("red") },
+                    [7] = new Dictionary<string, PropertyValue> { ["gold"] = PropertyValue.From(42) },
+                },
+                [2] = new()
+                {
+                    [0] = new Dictionary<string, PropertyValue> { ["team"] = PropertyValue.From("blue") },
+                },
+            });
         var d = (JoinInstanceAck)Roundtrip(m);
         Assert.Equal(42u, d.RequestId);
         Assert.Equal("room-1", d.InstanceName);
@@ -224,6 +236,24 @@ public class MessageCodecTests
         Assert.Equal("match", d.InstanceProperties["mode"].AsString);
         Assert.Equal(2, d.ObjectOwners[100]);
         Assert.Equal(98765L, d.ServerTimeMs);
+        Assert.Equal(2, d.ExistingPeersData.Count);
+        Assert.Equal("red", d.ExistingPeersData[1][0]["team"].AsString);
+        Assert.Equal(42, d.ExistingPeersData[1][7]["gold"].AsInt);
+        Assert.Equal("blue", d.ExistingPeersData[2][0]["team"].AsString);
+    }
+
+    [Fact]
+    public void JoinInstanceAck_EmptyExistingPeersData_RoundTrips()
+    {
+        var m = new JoinInstanceAck(
+            1, "room-x", 1, 1,
+            new[] { 1 },
+            new Dictionary<string, PropertyValue>(),
+            new Dictionary<int, int>(),
+            0L,
+            new Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>>());
+        var d = (JoinInstanceAck)Roundtrip(m);
+        Assert.Empty(d.ExistingPeersData);
     }
 
     [Fact]

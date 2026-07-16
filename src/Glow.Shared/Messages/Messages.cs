@@ -135,7 +135,17 @@ public sealed record JoinInstanceAck(
     int[] PeerIds,
     Dictionary<string, PropertyValue> InstanceProperties,
     Dictionary<int, int> ObjectOwners,
-    long ServerTimeMs) : Message
+    long ServerTimeMs,
+    // Every existing active peer's PeerData snapshot captured at ack
+    // time, keyed by PeerId. The inner map mirrors the store-tagged
+    // shape carried by HelloAck / PeerJoined / GetPeerDataAck so the
+    // joiner can rebuild remote state in one atomic step -- no need
+    // to wait for a train of PeerDataChanged messages. Peers with no
+    // populated stores are omitted; the map is empty when the joiner
+    // is alone. Concurrent SetPeerData calls that land between the
+    // snapshot and the ack arriving are still delivered as normal
+    // PeerDataChanged notifications after the join.
+    Dictionary<int, Dictionary<byte, Dictionary<string, PropertyValue>>> ExistingPeersData) : Message
 {
     public override MessageType Type => MessageType.JoinInstanceAck;
     public override void WriteTo(NetDataWriter w)
@@ -149,6 +159,7 @@ public sealed record JoinInstanceAck(
         w.PutPropertyMap(InstanceProperties);
         w.PutIntIntMap(ObjectOwners);
         w.Put(ServerTimeMs);
+        w.PutPeerStorePropertyMap(ExistingPeersData);
     }
     public static JoinInstanceAck ReadFrom(NetDataReader r) => new(
         r.GetUInt(),
@@ -158,7 +169,8 @@ public sealed record JoinInstanceAck(
         r.GetOptIntArray() ?? Array.Empty<int>(),
         r.GetPropertyMap(),
         r.GetIntIntMap(),
-        r.GetLong());
+        r.GetLong(),
+        r.GetPeerStorePropertyMap());
 }
 
 public sealed record LeaveInstance(uint RequestId, bool BecomeInactive) : Message

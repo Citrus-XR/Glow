@@ -8,16 +8,18 @@ using System.Threading.Tasks;
 namespace Glow.Shared
 {
 // Wire protocol constants. Not derived from any prior networking library.
-// V4 protocol: PeerData is a byte-tagged namespace map (client picks
-// arbitrary tags 0..255 with independent server-side byte quotas);
-// SendMessage carries a CacheKey for CachePolicy.ReplaceLatest to
-// dedupe per logical stream; HelloAck carries the server's build
-// version string so clients can display / audit the peer they
-// connected to.
+// V5 protocol: JoinInstanceAck now carries every existing peer's
+// PeerData snapshot inline, so late joiners rebuild remote state
+// atomically instead of waiting for a follow-up train of
+// PeerDataChanged replays. V4 additions retained: PeerData is a
+// byte-tagged namespace map with per-tag quotas; SendMessage carries
+// a CacheKey for CachePolicy.ReplaceLatest to dedupe per logical
+// stream; HelloAck carries the server's build version string so
+// clients can display / audit the peer they connected to.
 public static class Meta
 {
     public const string Name = "Glow";
-    public const int ProtocolVersion = 4;
+    public const int ProtocolVersion = 5;
 
     // Build version stamped by CI via -p:InformationalVersion. When
     // built locally without that flag the compiler falls back to the

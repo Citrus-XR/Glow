@@ -20,11 +20,16 @@ public class StabilityTests
 
     static async Task<int> Join(TestClient c, string instance, JoinMode mode = JoinMode.JoinExisting)
     {
+        var ack = await JoinAck(c, instance, mode);
+        return ack.MyPeerId;
+    }
+
+    static async Task<JoinInstanceAck> JoinAck(TestClient c, string instance, JoinMode mode = JoinMode.JoinExisting)
+    {
         var reqId = c.AllocateRequestId();
         var resp = await c.Request(reqId, new JoinInstance(reqId, instance, mode,
             new Dictionary<string, PropertyValue>()));
-        var ack = Assert.IsType<JoinInstanceAck>(resp);
-        return ack.MyPeerId;
+        return Assert.IsType<JoinInstanceAck>(resp);
     }
 
     // ============================================================
@@ -76,10 +81,55 @@ public class StabilityTests
 
         Assert.True(await b.ConnectAsync(srv.Port));
         await Hello(b, "bob");
-        await Join(b, "test-instance");
+        var bAck = await JoinAck(b, "test-instance");
 
-        var pd = await b.WaitFor<PeerDataChanged>(p => p.PeerId == aPeer && p.Store == 0);
-        Assert.Equal(PropertyValue.From(100), pd.Patch["score"]);
+        Assert.True(bAck.ExistingPeersData.ContainsKey(aPeer));
+        var aStores = bAck.ExistingPeersData[aPeer];
+        Assert.True(aStores.ContainsKey(0));
+        Assert.Equal(PropertyValue.From(100), aStores[0]["score"]);
+        Assert.DoesNotContain(bAck.MyPeerId, bAck.ExistingPeersData.Keys);
+    }
+
+    [Fact]
+    public async Task FirstJoiner_ExistingPeersDataIsEmpty()
+    {
+        await using var srv = new ServerHarness();
+        await using var a = new TestClient();
+
+        Assert.True(await a.ConnectAsync(srv.Port));
+        await Hello(a, "alice");
+        var setId = a.AllocateRequestId();
+        await a.Request(setId, new Shared.Messages.SetPeerData(setId, 0,
+            new Dictionary<string, PropertyValue> { ["score"] = PropertyValue.From(7) }));
+        var ack = await JoinAck(a, "test-instance");
+
+        Assert.Empty(ack.ExistingPeersData);
+    }
+
+    [Fact]
+    public async Task NewJoiner_ExistingPeersData_CoversMultipleStores()
+    {
+        await using var srv = new ServerHarness();
+        await using var a = new TestClient();
+        await using var b = new TestClient();
+
+        Assert.True(await a.ConnectAsync(srv.Port));
+        await Hello(a, "alice");
+        var s0 = a.AllocateRequestId();
+        await a.Request(s0, new Shared.Messages.SetPeerData(s0, 0,
+            new Dictionary<string, PropertyValue> { ["team"] = PropertyValue.From("red") }));
+        var s7 = a.AllocateRequestId();
+        await a.Request(s7, new Shared.Messages.SetPeerData(s7, 7,
+            new Dictionary<string, PropertyValue> { ["gold"] = PropertyValue.From(42) }));
+        var aPeer = await Join(a, "test-instance");
+
+        Assert.True(await b.ConnectAsync(srv.Port));
+        await Hello(b, "bob");
+        var bAck = await JoinAck(b, "test-instance");
+
+        var aStores = bAck.ExistingPeersData[aPeer];
+        Assert.Equal("red", aStores[0]["team"].AsString);
+        Assert.Equal(42, aStores[7]["gold"].AsInt);
     }
 
     [Fact]
