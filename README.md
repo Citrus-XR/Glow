@@ -130,7 +130,7 @@ connection.Fire(new SendMessage(0, 90, Routing.Others, null, 0,
 
 ## CI と release
 
-`.github/workflows/ci.yml` は main push と pull request で solution 全 test を実行します。release workflow も release 作成前に同じ test を通します。外部 GitHub Action は full commit SHA に pin し、version tag は comment に残します。
+`.github/workflows/ci.yml` は main push と pull request で solution 全 test を実行します。release workflow も release 作成前に同じ test を通します。外部 GitHub Action は Node 24 対応 release の full commit SHA に pin し、version tag は comment に残します。
 
 tag は `v<major>.<minor>.<patch>` または prerelease のみ許可し、build metadata を含めません。CI は source SHA を assembly informational version に付加します。
 
@@ -144,8 +144,9 @@ release workflow:
 6. draft release に全 asset を upload
 7. GitHub API の size/digest を local artifact と照合
 8. draft を publish
+9. 公開後 API の `draft=false` と `immutable=true` を確認
 
-workflow は tag ごとの concurrency を使用し、既存 release を overwrite しません。repository settings では future release の immutability を有効にし、`v*` tag の update/delete も ruleset で禁止してください。immutability は有効化後に作る release だけへ適用されます。
+workflow は tag ごとの concurrency を使用し、既存 release を overwrite しません。repository の release immutability と、`v*` tag の update/delete を禁止する ruleset は必須です。公開後に immutable を確認できない場合、release job は失敗します。
 
 release asset:
 

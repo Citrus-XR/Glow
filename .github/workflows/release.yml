@@ -377,4 +377,13 @@ jobs:
             test "$(jq -r --arg name "$name" '.[] | select(.name==$name) | .digest' <<<"$remote_assets")" = "$expected_digest"
           done
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+          immutable=false
+          for _ in {1..10}; do
+            published_release="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
+            test "$(jq -r '.draft' <<<"$published_release")" = false
+            immutable="$(jq -r '.immutable' <<<"$published_release")"
+            if [[ "$immutable" == true ]]; then break; fi
+            sleep 2
+          done
+          test "$immutable" = true
           created=0
