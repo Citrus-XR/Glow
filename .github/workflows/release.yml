@@ -14,9 +14,40 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  release-guard:
+    name: validate release identity
+    runs-on: ubuntu-latest
+    steps:
+      - name: validate tag and refuse existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then exit 0; fi
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid immutable release tag: $tag" >&2
+            exit 1
+          fi
+          code="$(curl -sS -o /tmp/release.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+          case "$code" in
+            404) ;;
+            200) echo "Release $tag already exists." >&2; exit 1 ;;
+            *) cat /tmp/release.json >&2; echo "Release lookup failed with HTTP $code" >&2; exit 1 ;;
+          esac
+
   test:
     name: test (ubuntu)
+    needs: release-guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +133,19 @@ jobs:
           -p:InformationalVersion=${{ steps.ver.outputs.version_info }}
           -o publish/${{ matrix.rid }}/cli
 
+      - name: verify binary metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_build='${{ steps.ver.outputs.version_info }}'
+          expected_protocol="$(sed -n 's/.*ProtocolVersion = \([0-9][0-9]*\).*/\1/p' src/Glow.Shared/Meta.cs)"
+          server_json="$("publish/${{ matrix.rid }}/server/${{ matrix.server_bin }}" --version-json)"
+          cli_json="$("publish/${{ matrix.rid }}/cli/${{ matrix.cli_bin }}" --version-json)"
+          for payload in "$server_json" "$cli_json"; do
+            test "$(jq -r .buildVersion <<<"$payload")" = "$expected_build"
+            test "$(jq -r .protocolVersion <<<"$payload")" = "$expected_protocol"
+          done
+
       - name: stage payload
         shell: bash
         run: |
@@ -111,6 +155,14 @@ jobs:
           cp "publish/${{ matrix.rid }}/server/${{ matrix.server_bin }}" "$stage/"
           cp "publish/${{ matrix.rid }}/cli/${{ matrix.cli_bin }}" "$stage/"
           cp README.md "$stage/"
+          protocol="$(sed -n 's/.*ProtocolVersion = \([0-9][0-9]*\).*/\1/p' src/Glow.Shared/Meta.cs)"
+          jq -n \
+            --arg tag "${{ steps.ver.outputs.version }}" \
+            --arg buildVersion "${{ steps.ver.outputs.version_info }}" \
+            --arg commitSha "${GITHUB_SHA}" \
+            --argjson protocolVersion "$protocol" \
+            '{schemaVersion:1, tag:$tag, buildVersion:$buildVersion, commitSha:$commitSha, protocolVersion:$protocolVersion}' \
+            > "$stage/glow-build.json"
           ls -la "$stage"
 
       - name: archive (linux)
@@ -199,6 +251,14 @@ jobs:
           cp publish/unity-raw/Glow.Shared.dll "$stage/"
           cp publish/unity-raw/LiteNetLib.dll "$stage/"
           cp README.md "$stage/"
+          protocol="$(sed -n 's/.*ProtocolVersion = \([0-9][0-9]*\).*/\1/p' src/Glow.Shared/Meta.cs)"
+          jq -n \
+            --arg tag "${{ steps.ver.outputs.version }}" \
+            --arg buildVersion "${{ steps.ver.outputs.version_info }}" \
+            --arg commitSha "${GITHUB_SHA}" \
+            --argjson protocolVersion "$protocol" \
+            '{schemaVersion:1, tag:$tag, buildVersion:$buildVersion, commitSha:$commitSha, protocolVersion:$protocolVersion}' \
+            > "$stage/glow-build.json"
           ls -la "$stage"
 
       - name: archive
@@ -217,9 +277,65 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  release-manifest:
+    name: release manifest
+    needs: [build, unity-bundle]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: resolve version
+        id: ver
+        shell: bash
+        run: |
+          ref="${GITHUB_REF##*/}"
+          input="${{ github.event.inputs.tag }}"
+          if [ -n "$input" ]; then v="$input"; elif [[ "$ref" == v* ]]; then v="$ref"; else v="v0.0.0-dev+${GITHUB_SHA:0:8}"; fi
+          no_v="${v#v}"
+          info="$no_v"
+          if [[ "$info" != *+* ]]; then info="$info+${GITHUB_SHA:0:8}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "version_info=$info" >> "$GITHUB_OUTPUT"
+      - name: create manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          protocol="$(sed -n 's/.*ProtocolVersion = \([0-9][0-9]*\).*/\1/p' src/Glow.Shared/Meta.cs)"
+          name="glow-${{ steps.ver.outputs.version }}-manifest.json"
+          assets="$({
+            find artifacts -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) -print0 |
+              sort -z |
+              while IFS= read -r -d '' file; do
+                jq -n \
+                  --arg name "$(basename "$file")" \
+                  --argjson size "$(stat -c '%s' "$file")" \
+                  --arg sha256 "$(sha256sum "$file" | cut -d' ' -f1)" \
+                  '{name:$name,size:$size,sha256:$sha256}'
+              done
+          } | jq -s 'sort_by(.name)')"
+          jq -n \
+            --arg tag "${{ steps.ver.outputs.version }}" \
+            --arg buildVersion "${{ steps.ver.outputs.version_info }}" \
+            --arg commitSha "${GITHUB_SHA}" \
+            --argjson protocolVersion "$protocol" \
+            --argjson assets "$assets" \
+            '{schemaVersion:2, tag:$tag, buildVersion:$buildVersion, commitSha:$commitSha, protocolVersion:$protocolVersion, assets:$assets}' \
+            > "dist/$name"
+          ( cd dist && sha256sum "$name" > "$name.sha256" )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glow-release-manifest
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     name: publish release
-    needs: [build, unity-bundle]
+    needs: [build, unity-bundle, release-manifest]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -231,10 +347,34 @@ jobs:
       - name: list
         run: ls -la artifacts
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+      - name: create immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          created=0
+          cleanup() {
+            if [[ "$created" == 1 ]]; then
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes || true
+            fi
+          }
+          trap cleanup ERR
+          args=(release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --draft)
+          if [[ "$tag" == *-* ]]; then args+=(--prerelease); fi
+          gh "${args[@]}"
+          created=1
+          gh release upload "$tag" artifacts/* --repo "$GITHUB_REPOSITORY"
+
+          release_id="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)"
+          remote_assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets")"
+          for file in artifacts/*; do
+            name="$(basename "$file")"
+            expected_size="$(stat -c '%s' "$file")"
+            expected_digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
+            test "$(jq -r --arg name "$name" '.[] | select(.name==$name) | .size' <<<"$remote_assets")" = "$expected_size"
+            test "$(jq -r --arg name "$name" '.[] | select(.name==$name) | .digest' <<<"$remote_assets")" = "$expected_digest"
+          done
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+          created=0

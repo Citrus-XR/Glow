@@ -173,6 +173,26 @@ public class PeerDataStoreTests : IDisposable
     }
 
     [Fact]
+    public void Merge_NamespacedKeys_ApplyQuotaPerNamespace()
+    {
+        var store = new PeerDataStore(_dir, perStoreQuotaBytes: 1_000);
+        var (firstOk, _) = store.Merge("alice", 0,
+            new Dictionary<string, PropertyValue>
+            {
+                ["pd/world-a/state"] = PropertyValue.From(new byte[800]),
+            });
+        var (secondOk, snapshot) = store.Merge("alice", 0,
+            new Dictionary<string, PropertyValue>
+            {
+                ["pd/world-b/state"] = PropertyValue.From(new byte[800]),
+            });
+
+        Assert.True(firstOk);
+        Assert.True(secondOk);
+        Assert.Equal(2, snapshot.Count);
+    }
+
+    [Fact]
     public void Merge_EmptiedTag_IsPrunedFromDisk()
     {
         var s = new PeerDataStore(_dir);

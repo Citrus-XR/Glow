@@ -5,7 +5,8 @@ using Glow.Shared.Protocol;
 namespace Glow.Server.Handlers;
 
 // SetPeerData / GetPeerData. Patches merge into the caller's substore
-// dictionary keyed by (UserId, Store) (null value deletes). Over-quota
+// dictionary keyed by (UserId, Store) (null value deletes). Quota is checked
+// per slash-delimited key namespace. Over-quota
 // writes are rejected whole with SetPeerDataAck.ErrorCode = QuotaExceeded
 // and never persisted or broadcast. Successful mutations are broadcast
 // to the current instance as PeerDataChanged carrying the same store

@@ -1,4 +1,5 @@
 using Glow.Server.Instances;
+using Glow.Shared;
 using Glow.Shared.Messages;
 using Glow.Shared.Protocol;
 
@@ -25,6 +26,11 @@ public static class SendMessageHandler
         }
         var instance = session.CurrentInstance!;
         var sender = session.CurrentPeer!;
+        if (!AuthorizeStateMessage(instance, sender.PeerId, msg))
+        {
+            server.LogEvent($"[Instance] rejected unauthorized state code={msg.MessageCode} peer={sender.PeerId}");
+            return;
+        }
 
         List<Session> targets;
         switch (msg.Routing)
@@ -53,6 +59,41 @@ public static class SendMessageHandler
 
         var outgoing = new IncomingMessage(sender.PeerId, msg.MessageCode, msg.Delivery, msg.Channel, msg.Payload);
         server.Broadcast(targets, outgoing, msg.Delivery.ToTransport(), msg.Channel);
+    }
+
+    static bool AuthorizeStateMessage(Instance instance, int senderPeerId,
+        Shared.Messages.SendMessage msg)
+    {
+        if (msg.MessageCode is not (20 or 21 or 25 or 26 or 27)) return true;
+        try
+        {
+            var reader = new PayloadReader(msg.Payload);
+            var networkId = reader.GetInt();
+            if (networkId <= 0) return false;
+
+            if (networkId >= 100_000)
+                return networkId / 100_000 == senderPeerId;
+
+            if (msg.MessageCode == 27)
+            {
+                var occupier = reader.GetInt();
+                return occupier <= 0 || occupier == senderPeerId;
+            }
+
+            if (msg.MessageCode == 26)
+            {
+                _ = reader.GetByte();
+                var holder = reader.GetInt();
+                if (holder > 0 && holder != senderPeerId) return false;
+            }
+
+            return !instance.ObjectOwners.TryGetValue(networkId, out var owner)
+                   || owner == senderPeerId;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     static List<Session> ResolvePeers(GlowServer server, Instance instance, int[] ids)

@@ -6,6 +6,11 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--version-json")
+        {
+            Console.WriteLine($"{{\"buildVersion\":\"{Meta.BuildVersion}\",\"protocolVersion\":{Meta.ProtocolVersion}}}");
+            return 0;
+        }
         string? scriptPath = null;
         for (var i = 0; i < args.Length; i++)
         {

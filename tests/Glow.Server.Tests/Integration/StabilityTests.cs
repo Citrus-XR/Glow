@@ -635,6 +635,65 @@ public class StabilityTests
     }
 
     [Fact]
+    public async Task StateMessage_ExplicitNonOwner_IsRejectedBeforeBroadcast()
+    {
+        await using var srv = new ServerHarness();
+        await using var a = new TestClient();
+        await using var b = new TestClient();
+        Assert.True(await a.ConnectAsync(srv.Port));
+        await Hello(a, "alice");
+        var aPeer = await Join(a, "test-instance");
+        Assert.True(await b.ConnectAsync(srv.Port));
+        await Hello(b, "bob");
+        await Join(b, "test-instance");
+
+        var requestId = a.AllocateRequestId();
+        await a.Request(requestId,
+            new Shared.Messages.SetObjectOwner(requestId, 42, aPeer, false, 0));
+
+        var payload = new PayloadWriter().PutInt(42).ToPayload();
+        var before = a.ReceivedCount;
+        b.Fire(new Shared.Messages.SendMessage(0, 21, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, 2, payload, 42));
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(a.Received.Skip(before).OfType<IncomingMessage>(),
+            message => message.MessageCode == 21);
+
+        a.Fire(new Shared.Messages.SendMessage(0, 21, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, 2, payload, 42));
+        await b.WaitFor<IncomingMessage>(message => message.MessageCode == 21);
+    }
+
+    [Fact]
+    public async Task StateMessage_PlayerObjectId_RequiresBoundPlayer()
+    {
+        await using var srv = new ServerHarness();
+        await using var a = new TestClient();
+        await using var b = new TestClient();
+        Assert.True(await a.ConnectAsync(srv.Port));
+        await Hello(a, "alice");
+        var aPeer = await Join(a, "test-instance");
+        Assert.True(await b.ConnectAsync(srv.Port));
+        await Hello(b, "bob");
+        await Join(b, "test-instance");
+
+        var networkId = aPeer * 100_000 + 110;
+        var payload = new PayloadWriter().PutInt(networkId).ToPayload();
+        var before = a.ReceivedCount;
+        b.Fire(new Shared.Messages.SendMessage(0, 20, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, 2,
+            payload, networkId << 8));
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(a.Received.Skip(before).OfType<IncomingMessage>(),
+            message => message.MessageCode == 20);
+
+        a.Fire(new Shared.Messages.SendMessage(0, 20, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, 2,
+            payload, networkId << 8));
+        await b.WaitFor<IncomingMessage>(message => message.MessageCode == 20);
+    }
+
+    [Fact]
     public async Task ObjectOwner_OwnerLeaves_TransfersToMaster()
     {
         await using var srv = new ServerHarness();

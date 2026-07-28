@@ -6,9 +6,8 @@ namespace Glow.Server.Persistence;
 // owns a Dictionary<byte, Dictionary<string, PropertyValue>>: the outer
 // byte is a client-chosen "store tag" (0..255), the inner map is the
 // property set for that namespace. Client apps decide what each tag
-// means -- e.g. tag 0 for hot small metadata, tag 1 for a serialized
-// state blob -- Glow is agnostic. Every tag carries an independent
-// byte-size quota (configurable via ServerOptions); over-quota writes
+// means. Slash-delimited keys receive an independent quota per first
+// two segments; unscoped keys share one quota bucket. Over-quota writes
 // are dropped whole.
 //
 // On disk each user maps to `<baseDir>/<userId>.json`. Top-level keys
@@ -20,11 +19,11 @@ namespace Glow.Server.Persistence;
 // merge.
 public sealed class PeerDataStore
 {
-    // Default byte cap per (user, store tag). Chosen to comfortably hold
+    // Default byte cap per (user, store tag, key namespace). Chosen to comfortably hold
     // a small properties dict or a mid-size serialized blob without
     // encouraging clients to treat the store like a general filesystem.
     // Override via ServerOptions.PeerDataStoreQuotaBytes.
-    public const int DefaultPerStoreQuotaBytes = 100_000;
+    public const int DefaultPerStoreQuotaBytes = 100 * 1024;
 
     readonly string _baseDirectory;
     readonly int _perStoreQuotaBytes;
@@ -63,7 +62,7 @@ public sealed class PeerDataStore
 
     // Merges patch into the requested tag (null values delete). Returns
     // (true, snapshot) on success or (false, snapshot) if the patch would
-    // push the tag over PerStoreQuotaBytes -- in that case nothing is
+    // push any namespace over PerStoreQuotaBytes -- in that case nothing is
     // written and the returned snapshot is the pre-merge state. The
     // caller responds with QuotaExceeded to the client.
     public (bool Ok, Dictionary<string, PropertyValue> Snapshot) Merge(
@@ -86,8 +85,7 @@ public sealed class PeerDataStore
             else projected[kv.Key] = kv.Value;
         }
 
-        var projectedSize = EstimateStoreSize(projected);
-        if (projectedSize > _perStoreQuotaBytes)
+        if (EstimateQuotaScopes(projected).Values.Any(size => size > _perStoreQuotaBytes))
         {
             return (false, new Dictionary<string, PropertyValue>(current));
         }
@@ -129,6 +127,28 @@ public sealed class PeerDataStore
             total += EstimateValueSize(kv.Value);
         }
         return total;
+    }
+
+    public static Dictionary<string, int> EstimateQuotaScopes(
+        Dictionary<string, PropertyValue> store)
+    {
+        var scopes = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var kv in store)
+        {
+            var scope = QuotaScope(kv.Key);
+            var size = System.Text.Encoding.UTF8.GetByteCount(kv.Key) + EstimateValueSize(kv.Value);
+            scopes[scope] = scopes.TryGetValue(scope, out var current) ? current + size : size;
+        }
+        return scopes;
+    }
+
+    static string QuotaScope(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return string.Empty;
+        var first = key.IndexOf('/');
+        if (first <= 0) return string.Empty;
+        var second = key.IndexOf('/', first + 1);
+        return second > first + 1 ? key[..second] : string.Empty;
     }
 
     static int EstimateValueSize(in PropertyValue v) => v.Kind switch
