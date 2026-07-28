@@ -87,8 +87,9 @@ public static class SendMessageHandler
                 if (holder > 0 && holder != senderPeerId) return false;
             }
 
-            return !instance.ObjectOwners.TryGetValue(networkId, out var owner)
-                   || owner == senderPeerId;
+            return instance.ObjectOwners.TryGetValue(networkId, out var owner)
+                ? owner == senderPeerId
+                : instance.MasterPeerId == senderPeerId;
         }
         catch
         {

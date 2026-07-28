@@ -10,7 +10,7 @@ Glow は LiteNetLib 上に構築した self-hosted relay server と client libra
 - default status HTTP: `http://localhost:5155/`
 - protocol version: `Glow.Shared.Meta.ProtocolVersion`
 
-通常の application payload は opaque data として中継します。予約済み realtime state code（20、21、25、26、27）は cache poisoning を防ぐため、server が先頭の NetworkID と sender authority を検査します。
+通常の application payload は opaque data として中継します。予約済み realtime state code（20、21、25、26、27）は cache poisoning を防ぐため、server が payload 先頭の NetworkID と sender authority を検査してから cache/broadcast します。
 
 ## 構成
 
@@ -69,13 +69,13 @@ CLI option は `glow.ini` より優先されます。設定ファイルが無い
 Status endpoint:
 
 - `GET /version`: build/protocol JSON
-- `GET /state`: session、instance、peer、owner、cache、bandwidth の JSON
+- `GET /state`: session、instance、peer、owner、cache、bandwidth JSON
 
 ## Instance と ownership
 
 peer は同時に一つの instance に所属します。PeerId は instance 内で単調増加し、active peer の最小 ID が transport master です。
 
-Object ownership は `NetworkId -> PeerId` map です。`SetObjectOwner` は expected owner を指定した CAS を使用でき、成功時に `SetObjectOwnerAck` と `ObjectOwnerChanged` が送られます。owner 離脱時は instance lifecycle が map を移譲します。client-side world roster が infrastructure peer を除外する場合、client は CAS で world master へ再投影します。
+Object ownership は `NetworkId -> PeerId` map です。`SetObjectOwner` は expected owner を指定した CAS を使用でき、成功時に `SetObjectOwnerAck` と `ObjectOwnerChanged` が送られます。owner 離脱時は instance lifecycle が map を移譲します。
 
 予約済み state message の server-side authorization:
 
@@ -83,7 +83,7 @@ Object ownership は `NetworkId -> PeerId` map です。`SetObjectOwner` は exp
 - scene object に明示 owner がある場合は、その peer のみ送信可能
 - Pickup enter は payload holder と sender の一致が必要
 - Station enter は payload occupier と sender の一致が必要
-- 明示 owner の無い scene object は client 側 derived master 検証も併用
+- 明示 owner の無い scene object は instance master のみ送信可能
 
 ## Message routing
 
@@ -99,9 +99,9 @@ Object ownership は `NetworkId -> PeerId` map です。`SetObjectOwner` は exp
 
 ## PeerData
 
-PeerData は user ID と byte store tag で分けた durable key-value store です。mutation は projected snapshot で quota を検査してから一括 commit され、失敗時に部分更新しません。
+PeerData は user ID と byte store tag で分けた durable key-value store です。mutation は projected snapshot で quota を検査してから一括 commit し、失敗時に部分更新しません。
 
-`prefix/namespace/key` 形式の key は先頭二 segment（例: `pd/world-id`、`po/world-id`）ごとに quota を適用します。slash namespace を持たない key は store tag 内の共通 scope です。これにより複数 world の durable data が同じ user store に存在しても、各 world の quota は独立します。
+`prefix/namespace/key` 形式の key は先頭二 segment（例: `pd/world-id`、`po/world-id`）ごとに quota を適用します。slash namespace を持たない key は store tag 内の共通 scope です。複数 world の durable data が同じ user store に存在しても、各 world の quota は独立します。
 
 保存形式は `<peer-data-dir>/<sanitized-user-id>.json` です。`SetPeerDataAck.ErrorCode` が `QuotaExceeded` の場合、mutation は保存も broadcast もされません。
 
@@ -128,11 +128,13 @@ connection.Fire(new SendMessage(0, 90, Routing.Others, null, 0,
     CachePolicy.None, DeliveryMode.ReliableOrdered, 0, payload));
 ```
 
-## Release
+## CI と release
+
+`.github/workflows/ci.yml` は main push と pull request で solution 全 test を実行します。release workflow も release 作成前に同じ test を通します。外部 GitHub Action は full commit SHA に pin し、version tag は comment に残します。
 
 tag は `v<major>.<minor>.<patch>` または prerelease のみ許可し、build metadata を含めません。CI は source SHA を assembly informational version に付加します。
 
-release workflow は次を実施します。
+release workflow:
 
 1. 既存 release を fail-closed で確認
 2. test
@@ -143,7 +145,7 @@ release workflow は次を実施します。
 7. GitHub API の size/digest を local artifact と照合
 8. draft を publish
 
-workflow は tag ごとの concurrency を使用し、既存 release を overwrite しません。repository settings でも future release の immutability を有効にしてください。公開後に asset や tag を置き換えず、新しい version tag を作成します。
+workflow は tag ごとの concurrency を使用し、既存 release を overwrite しません。repository settings では future release の immutability を有効にし、`v*` tag の update/delete も ruleset で禁止してください。immutability は有効化後に作る release だけへ適用されます。
 
 release asset:
 
@@ -155,12 +157,13 @@ glow-vX.Y.Z-manifest.json
 各 asset の .sha256
 ```
 
-schema 2 release manifest は tag、full commit SHA、build version、protocol version、および各 archive の name/size/SHA-256 を保持します。各 archive 内の `glow-build.json` も同じ identity を持ちます。
+schema 2 release manifest は tag、full commit SHA、build version、protocol version、各 archive の name/size/SHA-256 を保持します。archive 内の `glow-build.json` も同じ identity を持ちます。
 
 ## 検証
 
 ```sh
 dotnet test Glow.slnx -c Release
+actionlint .github/workflows/ci.yml .github/workflows/release.yml
 ```
 
-test は wire round-trip、cache、routing、CAS ownership、leave transfer、PeerData atomic quota、namespace quota、state sender authorization、live UDP ordering を含みます。release workflow 変更時は `actionlint .github/workflows/release.yml` も実行します。
+test は wire round-trip、cache、routing、CAS ownership、leave transfer、PeerData atomic quota、namespace quota、state sender authorization、live UDP ordering を含みます。

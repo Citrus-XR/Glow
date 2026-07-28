@@ -694,6 +694,44 @@ public class StabilityTests
     }
 
     [Fact]
+    public async Task StateMessage_UnownedSceneId_RequiresMasterAndCannotPoisonCache()
+    {
+        await using var srv = new ServerHarness();
+        await using var master = new TestClient();
+        await using var other = new TestClient();
+        Assert.True(await master.ConnectAsync(srv.Port));
+        await Hello(master, "master");
+        var masterPeer = await Join(master, "test-instance");
+        Assert.True(await other.ConnectAsync(srv.Port));
+        await Hello(other, "other");
+        await Join(other, "test-instance");
+
+        const int networkId = 43;
+        var payload = new PayloadWriter().PutInt(networkId).ToPayload();
+        var before = master.ReceivedCount;
+        other.Fire(new Shared.Messages.SendMessage(0, 20, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, 2,
+            payload, networkId << 8));
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(master.Received.Skip(before).OfType<IncomingMessage>(),
+            message => message.MessageCode == 20);
+
+        await using var late = new TestClient();
+        Assert.True(await late.ConnectAsync(srv.Port));
+        await Hello(late, "late");
+        await Join(late, "test-instance");
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(late.Received.OfType<IncomingCachedMessage>(),
+            message => message.MessageCode == 20);
+
+        Assert.Equal(1, masterPeer);
+        master.Fire(new Shared.Messages.SendMessage(0, 20, Routing.Others, null, 0,
+            CachePolicy.ReplaceLatestGlobal, DeliveryMode.ReliableOrdered, 2,
+            payload, networkId << 8));
+        await other.WaitFor<IncomingMessage>(message => message.MessageCode == 20);
+    }
+
+    [Fact]
     public async Task ObjectOwner_OwnerLeaves_TransfersToMaster()
     {
         await using var srv = new ServerHarness();
